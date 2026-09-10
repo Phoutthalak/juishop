@@ -13,7 +13,10 @@ import type {
 } from "./types";
 import { convertFromBase, roundMoney } from "./money";
 
-const dataDir = path.join(process.cwd(), "data");
+// const dataDir = path.join(process.cwd(), "data");
+// const storePath = path.join(dataDir, "store.json");
+// Replace your existing dataDir and storePath declarations with this:
+const dataDir = path.join("/tmp", "data");
 const storePath = path.join(dataDir, "store.json");
 
 function ensureStore(): StoreData {
