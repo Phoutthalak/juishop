@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, IBM_Plex_Mono, Outfit, Noto_Sans_Lao } from "next/font/google";
 import { AppNav } from "@/components/AppNav";
+import { StaffGate } from "@/components/StaffGate";
 import "./globals.css";
 
 const outfit = Outfit({
@@ -40,10 +41,12 @@ export default function RootLayout({
       <body
         className={`${outfit.variable} ${fraunces.variable} ${plex.variable} ${notoLao.variable} antialiased font-lao`}
       >
-        <div className="mx-auto flex min-h-dvh max-w-[1400px] flex-col px-3 py-3 sm:px-5">
-          <AppNav />
-          <main className="mt-3 flex-1">{children}</main>
-        </div>
+        <StaffGate>
+          <div className="mx-auto flex min-h-dvh max-w-[1400px] flex-col px-3 py-3 sm:px-5">
+            <AppNav />
+            <main className="mt-3 flex-1">{children}</main>
+          </div>
+        </StaffGate>
       </body>
     </html>
   );

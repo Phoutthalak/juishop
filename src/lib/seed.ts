@@ -7,6 +7,8 @@ export const defaultStore = (): StoreData => ({
     lakPerThb: 550,
     qrNote: "Scan shop QR, then tap Confirm paid",
     receiptFooter: "Thank you / ຂອບໃຈ",
+    accessPin: "",
+    qrImage: "",
   },
   products: [
     {

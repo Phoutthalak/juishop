@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { convertFromBase, formatMoney } from "@/lib/money";
+import { getStaffName } from "@/lib/staff";
 import type {
   Currency,
   Order,
@@ -162,6 +163,7 @@ export function PosClient() {
           discountBase,
           method: payMethod,
           currency: payCurrency,
+          cashier: getStaffName(),
         }),
       });
       const data = await res.json();
@@ -420,7 +422,16 @@ export function PosClient() {
               {payMethod === "qr" && (
                 <div className="mt-3 rounded-md border border-dashed border-[var(--line)] bg-white p-4 text-sm text-[var(--muted)]">
                   <p className="font-medium text-[var(--ink)]">ຈ່າຍຜ່ານ QR</p>
-                  <p className="mt-1">{settings.qrNote}</p>
+                  {settings.qrImage ? (
+                    <img
+                      src={settings.qrImage}
+                      alt="Bank QR"
+                      className="mx-auto mt-3 h-48 w-48 object-contain"
+                    />
+                  ) : (
+                    <p className="mt-2 text-xs">Add your bank QR in Settings.</p>
+                  )}
+                  <p className="mt-2">{settings.qrNote}</p>
                   <p className="mt-2 font-[family-name:var(--font-plex)] text-lg text-[var(--ink)]">
                     {formatMoney(totalDisplay, payCurrency)}
                   </p>
@@ -444,14 +455,25 @@ export function PosClient() {
 
       {lastOrder && (
         <Modal title="ການຂາຍສຳເລັດ" onClose={() => setLastOrder(null)}>
-          <Receipt order={lastOrder} settings={settings} />
-          <button
-            type="button"
-            className="mt-4 min-h-11 w-full rounded-lg bg-[var(--brand)] text-white animate-pop hover-lift"
-            onClick={() => setLastOrder(null)}
-          >
-            ຂາຍໃໝ່
-          </button>
+          <div className="receipt-print">
+            <Receipt order={lastOrder} settings={settings} />
+          </div>
+          <div className="mt-4 flex gap-2 print:hidden">
+            <button
+              type="button"
+              className="min-h-11 flex-1 rounded-lg border border-[var(--line)]"
+              onClick={() => window.print()}
+            >
+              ພິມໃບບິນ
+            </button>
+            <button
+              type="button"
+              className="min-h-11 flex-1 rounded-lg bg-[var(--brand)] text-white animate-pop hover-lift"
+              onClick={() => setLastOrder(null)}
+            >
+              ຂາຍໃໝ່
+            </button>
+          </div>
         </Modal>
       )}
     </div>
@@ -468,9 +490,9 @@ function Modal({
   children: React.ReactNode;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center">
-      <div className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-xl bg-[var(--surface)] p-4 shadow-xl">
-        <div className="mb-3 flex items-center justify-between gap-2">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center print:static print:bg-transparent print:p-0">
+      <div className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-xl bg-[var(--surface)] p-4 shadow-xl print:max-h-none print:overflow-visible print:rounded-none print:p-0 print:shadow-none">
+        <div className="mb-3 flex items-center justify-between gap-2 print:hidden">
           <h3 className="font-[family-name:var(--font-display)] text-xl text-[var(--brand-deep)]">
             {title}
           </h3>
@@ -496,6 +518,7 @@ function Receipt({ order, settings }: { order: Order; settings: Settings }) {
       </p>
       <p className="text-[var(--muted)]">
         {new Date(order.createdAt).toLocaleString()} · {order.id}
+        {order.cashier ? ` · ${order.cashier}` : ""}
       </p>
       <ul className="mt-3 space-y-1 border-y border-[var(--line)] py-3">
         {order.items.map((item) => (

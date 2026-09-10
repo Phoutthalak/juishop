@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       method: PayMethod;
       currency: Currency;
       note?: string;
+      cashier?: string;
     };
     if (body.method !== "cash" && body.method !== "qr") {
       return NextResponse.json({ error: "Payment must be cash or qr" }, { status: 400 });

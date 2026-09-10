@@ -164,6 +164,7 @@ export default function ReportsPage() {
             <thead className="text-[var(--muted)]">
               <tr>
                 <th className="py-2 pr-3 font-medium">When</th>
+                <th className="py-2 pr-3 font-medium">Staff</th>
                 <th className="py-2 pr-3 font-medium">Paid</th>
                 <th className="py-2 pr-3 font-medium">Base</th>
                 <th className="py-2 pr-3 font-medium">Status</th>
@@ -176,6 +177,7 @@ export default function ReportsPage() {
                   <td className="py-2 pr-3">
                     {new Date(o.createdAt).toLocaleString()}
                   </td>
+                  <td className="py-2 pr-3">{o.cashier || "—"}</td>
                   <td className="py-2 pr-3 font-[family-name:var(--font-plex)]">
                     {formatMoney(o.payment.amount, o.payment.currency)}{" "}
                     {o.payment.method.toUpperCase()}
@@ -200,7 +202,7 @@ export default function ReportsPage() {
               ))}
               {orders.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-4 text-[var(--muted)]">
+                  <td colSpan={6} className="py-4 text-[var(--muted)]">
                     No sales yet — use the Sell screen.
                   </td>
                 </tr>

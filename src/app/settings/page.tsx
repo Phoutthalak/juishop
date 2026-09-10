@@ -8,6 +8,7 @@ const inputClass =
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [accessPin, setAccessPin] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -32,14 +33,17 @@ export default function SettingsPage() {
     setError(null);
     setMessage(null);
     try {
+      const payload: Partial<Settings> = { ...settings };
+      if (accessPin.trim()) payload.accessPin = accessPin.trim();
       const res = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
       setSettings(data);
+      setAccessPin("");
       setMessage("Settings saved");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -48,11 +52,39 @@ export default function SettingsPage() {
     }
   }
 
-  async function resetDemo() {
-    if (!confirm("Reset products, stock, and sales to demo data?")) return;
-    await fetch("/api/reset", { method: "POST" });
-    await load();
-    setMessage("Demo data restored");
+  function onQrFile(file: File) {
+    if (!settings) return;
+    if (file.size > 400_000) {
+      setError("QR image must be under 400 KB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSettings({ ...settings, qrImage: String(reader.result) });
+      setError(null);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function downloadBackup() {
+    setError(null);
+    try {
+      const res = await fetch("/api/backup", { cache: "no-store" });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Backup failed");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `pos-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMessage("Backup downloaded");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Backup failed");
+    }
   }
 
   if (!settings) {
@@ -120,6 +152,38 @@ export default function SettingsPage() {
         </label>
 
         <label className="block text-sm">
+          <span className="mb-1 block text-[var(--muted)]">Staff PIN</span>
+          <input
+            type="password"
+            inputMode="numeric"
+            className={inputClass}
+            value={accessPin}
+            placeholder={settings.hasAccessPin ? "PIN is set — type to change" : "Set a PIN"}
+            onChange={(e) => setAccessPin(e.target.value)}
+          />
+        </label>
+
+        <label className="block text-sm">
+          <span className="mb-1 block text-[var(--muted)]">Bank QR image</span>
+          <input
+            type="file"
+            accept="image/*"
+            className="w-full text-sm"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onQrFile(file);
+            }}
+          />
+          {settings.qrImage && (
+            <img
+              src={settings.qrImage}
+              alt="Shop QR"
+              className="mt-2 h-32 w-32 rounded-md border border-[var(--line)] bg-white object-contain p-1"
+            />
+          )}
+        </label>
+
+        <label className="block text-sm">
           <span className="mb-1 block text-[var(--muted)]">QR payment note</span>
           <textarea
             className={`${inputClass} min-h-20 py-2`}
@@ -154,10 +218,10 @@ export default function SettingsPage() {
 
       <button
         type="button"
-        onClick={() => void resetDemo()}
-        className="min-h-11 w-full rounded-lg border border-[var(--line)] bg-white text-sm text-[var(--muted)]"
+        onClick={() => void downloadBackup()}
+        className="min-h-11 w-full rounded-lg border border-[var(--line)] bg-white text-sm"
       >
-        Reset demo catalog & sales
+        Download backup
       </button>
     </div>
   );

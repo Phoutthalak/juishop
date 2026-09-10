@@ -10,6 +10,11 @@ export interface Settings {
   lakPerThb: number;
   qrNote: string;
   receiptFooter: string;
+  /** Shop PIN for staff login. Never sent to the browser. */
+  accessPin?: string;
+  /** Bank/shop QR image (data URL or https URL). */
+  qrImage?: string;
+  hasAccessPin?: boolean;
 }
 
 export interface Variant {
@@ -65,6 +70,7 @@ export interface Order {
   fxRateUsed: number;
   status: OrderStatus;
   note?: string;
+  cashier?: string;
 }
 
 export interface StoreData {

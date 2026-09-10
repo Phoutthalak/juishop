@@ -26,8 +26,48 @@ function cloneStore(data: StoreData): StoreData {
 }
 
 function asStore(payload: unknown): StoreData {
-  if (typeof payload === "string") return JSON.parse(payload) as StoreData;
-  return payload as StoreData;
+  const data =
+    typeof payload === "string"
+      ? (JSON.parse(payload) as StoreData)
+      : (payload as StoreData);
+  return normalizeStore(data);
+}
+
+function normalizeStore(data: StoreData): StoreData {
+  return {
+    settings: {
+      shopName: data.settings?.shopName ?? "AllNew Shop",
+      baseCurrency: data.settings?.baseCurrency ?? "LAK",
+      lakPerThb: data.settings?.lakPerThb ?? 550,
+      qrNote: data.settings?.qrNote ?? "",
+      receiptFooter: data.settings?.receiptFooter ?? "",
+      accessPin: data.settings?.accessPin ?? "",
+      qrImage: data.settings?.qrImage ?? "",
+    },
+    products: data.products ?? [],
+    orders: data.orders ?? [],
+  };
+}
+
+export function toPublicSettings(settings: Settings): Settings {
+  const { accessPin, ...rest } = settings;
+  return {
+    ...rest,
+    hasAccessPin: Boolean(accessPin),
+  };
+}
+
+export function toPublicStore(store: StoreData): StoreData {
+  return {
+    ...store,
+    settings: toPublicSettings(store.settings),
+  };
+}
+
+export function verifyAccessPin(settings: Settings, pin: string): boolean {
+  const expected = settings.accessPin ?? "";
+  if (!expected) return true;
+  return pin === expected;
 }
 
 function readFileStore(): StoreData {
@@ -37,7 +77,7 @@ function readFileStore(): StoreData {
     writeFileSync(storePath, JSON.stringify(seed, null, 2), "utf8");
     return seed;
   }
-  return JSON.parse(readFileSync(storePath, "utf8")) as StoreData;
+  return normalizeStore(JSON.parse(readFileSync(storePath, "utf8")) as StoreData);
 }
 
 function writeFileStore(data: StoreData) {
@@ -129,7 +169,18 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
   return withStore((store) => {
-    store.settings = { ...store.settings, ...patch };
+    const nextPin =
+      patch.accessPin !== undefined && patch.accessPin !== ""
+        ? patch.accessPin
+        : store.settings.accessPin;
+    const safePatch = { ...patch };
+    delete safePatch.accessPin;
+    delete safePatch.hasAccessPin;
+    store.settings = {
+      ...store.settings,
+      ...safePatch,
+      accessPin: nextPin,
+    };
     return store.settings;
   });
 }
@@ -161,6 +212,7 @@ export async function createSale(input: {
   method: PayMethod;
   currency: Currency;
   note?: string;
+  cashier?: string;
 }): Promise<Order> {
   return withStore((store) => {
     const { settings } = store;
@@ -219,6 +271,7 @@ export async function createSale(input: {
       fxRateUsed: settings.lakPerThb,
       status: "completed",
       note: input.note,
+      cashier: input.cashier?.trim() || undefined,
     };
 
     store.orders.unshift(order);
@@ -240,15 +293,5 @@ export async function voidOrder(orderId: string): Promise<Order> {
 
     order.status = "void";
     return order;
-  });
-}
-
-export async function resetToSeed(): Promise<StoreData> {
-  return withStore((store) => {
-    const seed = defaultStore();
-    store.settings = seed.settings;
-    store.products = seed.products;
-    store.orders = seed.orders;
-    return store;
   });
 }
