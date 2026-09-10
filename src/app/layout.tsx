@@ -26,7 +26,7 @@ const notoLao = Noto_Sans_Lao({
 });
 
 export const metadata: Metadata = {
-  title: "Corner Shop POS",
+  title: "AllNew Shop POS",
   description: "POS for clothes, gifts, and empty boxes — Cash & QR, THB & LAK",
 };
 
