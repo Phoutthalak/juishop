@@ -48,7 +48,12 @@ export function PosClient() {
 
   const load = useCallback(async () => {
     const res = await fetch("/api/store", { cache: "no-store" });
-    const data = (await res.json()) as StoreData;
+    const data = (await res.json()) as StoreData & { error?: string };
+    if (!res.ok) {
+      setError(data.error || "Failed to load store");
+      return;
+    }
+    setError(null);
     setSettings(data.settings);
     setProducts(data.products.filter((p) => p.active));
     setPayCurrency(data.settings.baseCurrency);
@@ -176,7 +181,11 @@ export function PosClient() {
   if (!settings) {
     return (
       <div className="rounded-xl bg-[var(--surface)] p-8 text-[var(--muted)]">
-        ກຳລັງໂຫຼດ POS…
+        {error ? (
+          <p className="text-[var(--danger)]">{error}</p>
+        ) : (
+          "ກຳລັງໂຫຼດ POS…"
+        )}
       </div>
     );
   }

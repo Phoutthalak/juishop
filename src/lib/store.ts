@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
+import { getSql, usesPostgres } from "./db";
 import { defaultStore } from "./seed";
 import type {
   CartLineInput,
@@ -13,155 +14,241 @@ import type {
 } from "./types";
 import { convertFromBase, roundMoney } from "./money";
 
-// const dataDir = path.join(process.cwd(), "data");
-// const storePath = path.join(dataDir, "store.json");
-// Replace your existing dataDir and storePath declarations with this:
-const dataDir = path.join("/tmp", "data");
+const dataDir = path.join(process.cwd(), "data");
 const storePath = path.join(dataDir, "store.json");
 
-function ensureStore(): StoreData {
+type StoreRow = { payload: unknown; version: number };
+
+let initPromise: Promise<void> | null = null;
+
+function cloneStore(data: StoreData): StoreData {
+  return structuredClone(data);
+}
+
+function asStore(payload: unknown): StoreData {
+  if (typeof payload === "string") return JSON.parse(payload) as StoreData;
+  return payload as StoreData;
+}
+
+function readFileStore(): StoreData {
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
   if (!existsSync(storePath)) {
     const seed = defaultStore();
     writeFileSync(storePath, JSON.stringify(seed, null, 2), "utf8");
     return seed;
   }
-  const raw = readFileSync(storePath, "utf8");
-  return JSON.parse(raw) as StoreData;
+  return JSON.parse(readFileSync(storePath, "utf8")) as StoreData;
 }
 
-function saveStore(data: StoreData) {
+function writeFileStore(data: StoreData) {
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
   writeFileSync(storePath, JSON.stringify(data, null, 2), "utf8");
 }
 
-export function getStore(): StoreData {
-  return ensureStore();
+async function ensurePostgres() {
+  if (!initPromise) {
+    initPromise = (async () => {
+      const sql = getSql();
+      await sql`
+        CREATE TABLE IF NOT EXISTS pos_store (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          payload JSONB NOT NULL,
+          version INTEGER NOT NULL DEFAULT 0,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      const seed = JSON.stringify(defaultStore());
+      await sql`
+        INSERT INTO pos_store (id, payload, version)
+        VALUES (1, ${seed}::jsonb, 0)
+        ON CONFLICT (id) DO NOTHING
+      `;
+    })().catch((err) => {
+      initPromise = null;
+      throw err;
+    });
+  }
+  await initPromise;
 }
 
-export function getSettings(): Settings {
-  return getStore().settings;
+async function loadStore(): Promise<{ data: StoreData; version: number }> {
+  if (!usesPostgres()) {
+    return { data: cloneStore(readFileStore()), version: 0 };
+  }
+
+  await ensurePostgres();
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT payload, version FROM pos_store WHERE id = 1
+  `) as StoreRow[];
+  const row = rows[0];
+  if (!row) {
+    const seed = defaultStore();
+    return { data: seed, version: 0 };
+  }
+  return { data: cloneStore(asStore(row.payload)), version: Number(row.version) };
 }
 
-export function updateSettings(patch: Partial<Settings>): Settings {
-  const store = getStore();
-  store.settings = { ...store.settings, ...patch };
-  saveStore(store);
-  return store.settings;
+async function saveStore(data: StoreData, version: number): Promise<boolean> {
+  if (!usesPostgres()) {
+    writeFileStore(data);
+    return true;
+  }
+
+  await ensurePostgres();
+  const sql = getSql();
+  const payload = JSON.stringify(data);
+  const rows = (await sql`
+    UPDATE pos_store
+    SET payload = ${payload}::jsonb,
+        version = version + 1,
+        updated_at = NOW()
+    WHERE id = 1 AND version = ${version}
+    RETURNING version
+  `) as Array<{ version: number }>;
+  return rows.length > 0;
 }
 
-export function listProducts(): Product[] {
-  return getStore().products;
+async function withStore<T>(mutator: (store: StoreData) => T): Promise<T> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data, version } = await loadStore();
+    const result = mutator(data);
+    if (await saveStore(data, version)) return result;
+  }
+  throw new Error("Could not save — another sale updated stock. Please try again.");
 }
 
-export function upsertProduct(product: Product): Product {
-  const store = getStore();
-  const idx = store.products.findIndex((p) => p.id === product.id);
-  if (idx >= 0) store.products[idx] = product;
-  else store.products.push(product);
-  saveStore(store);
-  return product;
+export async function getStore(): Promise<StoreData> {
+  const { data } = await loadStore();
+  return data;
 }
 
-export function listOrders(): Order[] {
-  return getStore().orders;
+export async function getSettings(): Promise<Settings> {
+  return (await getStore()).settings;
+}
+
+export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
+  return withStore((store) => {
+    store.settings = { ...store.settings, ...patch };
+    return store.settings;
+  });
+}
+
+export async function listProducts(): Promise<Product[]> {
+  return (await getStore()).products;
+}
+
+export async function upsertProduct(product: Product): Promise<Product> {
+  return withStore((store) => {
+    const idx = store.products.findIndex((p) => p.id === product.id);
+    if (idx >= 0) store.products[idx] = product;
+    else store.products.push(product);
+    return product;
+  });
+}
+
+export async function listOrders(): Promise<Order[]> {
+  return (await getStore()).orders;
 }
 
 function newId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-export function createSale(input: {
+export async function createSale(input: {
   lines: CartLineInput[];
   discountBase?: number;
   method: PayMethod;
   currency: Currency;
   note?: string;
-}): Order {
-  const store = getStore();
-  const { settings } = store;
-  if (!input.lines.length) throw new Error("Cart is empty");
+}): Promise<Order> {
+  return withStore((store) => {
+    const { settings } = store;
+    if (!input.lines.length) throw new Error("Cart is empty");
 
-  const items: OrderItem[] = [];
+    const items: OrderItem[] = [];
 
-  for (const line of input.lines) {
-    const product = store.products.find((p) => p.id === line.productId && p.active);
-    if (!product) throw new Error(`Product not found: ${line.productId}`);
-    const variant = product.variants.find((v) => v.id === line.variantId);
-    if (!variant) throw new Error(`Variant not found: ${line.variantId}`);
-    if (line.qty <= 0) throw new Error("Quantity must be positive");
-    if (variant.stock < line.qty) {
-      throw new Error(`Not enough stock for ${product.name} (${variant.sku})`);
+    for (const line of input.lines) {
+      const product = store.products.find((p) => p.id === line.productId && p.active);
+      if (!product) throw new Error(`Product not found: ${line.productId}`);
+      const variant = product.variants.find((v) => v.id === line.variantId);
+      if (!variant) throw new Error(`Variant not found: ${line.variantId}`);
+      if (line.qty <= 0) throw new Error("Quantity must be positive");
+      if (variant.stock < line.qty) {
+        throw new Error(`Not enough stock for ${product.name} (${variant.sku})`);
+      }
+
+      const labelParts = [product.name];
+      if (variant.size) labelParts.push(variant.size);
+      if (variant.color) labelParts.push(variant.color);
+
+      items.push({
+        productId: product.id,
+        variantId: variant.id,
+        name: labelParts.join(" · "),
+        sku: variant.sku,
+        qty: line.qty,
+        unitPriceBase: product.price,
+        lineTotalBase: roundMoney(product.price * line.qty, settings.baseCurrency),
+      });
     }
 
-    const labelParts = [product.name];
-    if (variant.size) labelParts.push(variant.size);
-    if (variant.color) labelParts.push(variant.color);
+    const subtotal = items.reduce((s, i) => s + i.lineTotalBase, 0);
+    const discountBase = Math.max(0, input.discountBase ?? 0);
+    if (discountBase > subtotal) throw new Error("Discount exceeds subtotal");
+    const totalBase = roundMoney(subtotal - discountBase, settings.baseCurrency);
+    const amount = convertFromBase(totalBase, input.currency, settings);
 
-    items.push({
-      productId: product.id,
-      variantId: variant.id,
-      name: labelParts.join(" · "),
-      sku: variant.sku,
-      qty: line.qty,
-      unitPriceBase: product.price,
-      lineTotalBase: roundMoney(product.price * line.qty, settings.baseCurrency),
-    });
-  }
+    for (const line of input.lines) {
+      const product = store.products.find((p) => p.id === line.productId)!;
+      const variant = product.variants.find((v) => v.id === line.variantId)!;
+      variant.stock -= line.qty;
+    }
 
-  const subtotal = items.reduce((s, i) => s + i.lineTotalBase, 0);
-  const discountBase = Math.max(0, input.discountBase ?? 0);
-  if (discountBase > subtotal) throw new Error("Discount exceeds subtotal");
-  const totalBase = roundMoney(subtotal - discountBase, settings.baseCurrency);
-  const amount = convertFromBase(totalBase, input.currency, settings);
+    const order: Order = {
+      id: newId("ord"),
+      createdAt: new Date().toISOString(),
+      items,
+      discountBase,
+      totalBase,
+      payment: {
+        method: input.method,
+        currency: input.currency,
+        amount,
+      },
+      fxRateUsed: settings.lakPerThb,
+      status: "completed",
+      note: input.note,
+    };
 
-  // Deduct stock
-  for (const line of input.lines) {
-    const product = store.products.find((p) => p.id === line.productId)!;
-    const variant = product.variants.find((v) => v.id === line.variantId)!;
-    variant.stock -= line.qty;
-  }
-
-  const order: Order = {
-    id: newId("ord"),
-    createdAt: new Date().toISOString(),
-    items,
-    discountBase,
-    totalBase,
-    payment: {
-      method: input.method,
-      currency: input.currency,
-      amount,
-    },
-    fxRateUsed: settings.lakPerThb,
-    status: "completed",
-    note: input.note,
-  };
-
-  store.orders.unshift(order);
-  saveStore(store);
-  return order;
+    store.orders.unshift(order);
+    return order;
+  });
 }
 
-export function voidOrder(orderId: string): Order {
-  const store = getStore();
-  const order = store.orders.find((o) => o.id === orderId);
-  if (!order) throw new Error("Order not found");
-  if (order.status === "void") return order;
+export async function voidOrder(orderId: string): Promise<Order> {
+  return withStore((store) => {
+    const order = store.orders.find((o) => o.id === orderId);
+    if (!order) throw new Error("Order not found");
+    if (order.status === "void") return order;
 
-  for (const item of order.items) {
-    const product = store.products.find((p) => p.id === item.productId);
-    const variant = product?.variants.find((v) => v.id === item.variantId);
-    if (variant) variant.stock += item.qty;
-  }
+    for (const item of order.items) {
+      const product = store.products.find((p) => p.id === item.productId);
+      const variant = product?.variants.find((v) => v.id === item.variantId);
+      if (variant) variant.stock += item.qty;
+    }
 
-  order.status = "void";
-  saveStore(store);
-  return order;
+    order.status = "void";
+    return order;
+  });
 }
 
-export function resetToSeed(): StoreData {
-  const seed = defaultStore();
-  saveStore(seed);
-  return seed;
+export async function resetToSeed(): Promise<StoreData> {
+  return withStore((store) => {
+    const seed = defaultStore();
+    store.settings = seed.settings;
+    store.products = seed.products;
+    store.orders = seed.orders;
+    return store;
+  });
 }

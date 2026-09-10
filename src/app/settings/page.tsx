@@ -14,7 +14,12 @@ export default function SettingsPage() {
 
   const load = useCallback(async () => {
     const res = await fetch("/api/settings", { cache: "no-store" });
-    setSettings(await res.json());
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error || "Failed to load settings");
+      return;
+    }
+    setSettings(data);
   }, []);
 
   useEffect(() => {
@@ -51,7 +56,11 @@ export default function SettingsPage() {
   }
 
   if (!settings) {
-    return <p className="text-[var(--muted)]">Loading…</p>;
+    return (
+      <p className={error ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
+        {error ?? "Loading…"}
+      </p>
+    );
   }
 
   return (

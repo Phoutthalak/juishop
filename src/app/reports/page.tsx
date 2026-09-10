@@ -9,10 +9,16 @@ export default function ReportsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/store", { cache: "no-store" });
-    const data = (await res.json()) as StoreData;
+    const data = (await res.json()) as StoreData & { error?: string };
+    if (!res.ok) {
+      setError(data.error || "Failed to load reports");
+      return;
+    }
+    setError(null);
     setOrders(data.orders);
     setProducts(data.products);
     setSettings(data.settings);
@@ -85,7 +91,11 @@ export default function ReportsPage() {
   }
 
   if (!settings) {
-    return <p className="text-[var(--muted)]">Loading…</p>;
+    return (
+      <p className={error ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
+        {error ?? "Loading…"}
+      </p>
+    );
   }
 
   return (

@@ -30,8 +30,15 @@ export default function ProductsPage() {
       fetch("/api/products", { cache: "no-store" }),
       fetch("/api/settings", { cache: "no-store" }),
     ]);
-    setProducts(await pRes.json());
-    setSettings(await sRes.json());
+    const productsBody = await pRes.json();
+    const settingsBody = await sRes.json();
+    if (!pRes.ok || !sRes.ok) {
+      setError(productsBody.error || settingsBody.error || "Failed to load products");
+      return;
+    }
+    setError(null);
+    setProducts(productsBody);
+    setSettings(settingsBody);
   }, []);
 
   useEffect(() => {
@@ -87,6 +94,10 @@ export default function ProductsPage() {
           Add product
         </button>
       </div>
+
+      {error && !editing && (
+        <p className="text-sm text-[var(--danger)]">{error}</p>
+      )}
 
       <div className="overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--surface)]">
         <table className="min-w-full text-left text-sm">

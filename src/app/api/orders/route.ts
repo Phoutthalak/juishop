@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/http";
 import { createSale, listOrders, voidOrder } from "@/lib/store";
 import type { CartLineInput, Currency, PayMethod } from "@/lib/types";
 
@@ -6,7 +7,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(listOrders());
+  try {
+    return NextResponse.json(await listOrders());
+  } catch (e) {
+    return errorResponse(e, "Failed to load orders");
+  }
 }
 
 export async function POST(request: Request) {
@@ -24,11 +29,10 @@ export async function POST(request: Request) {
     if (body.currency !== "THB" && body.currency !== "LAK") {
       return NextResponse.json({ error: "Currency must be THB or LAK" }, { status: 400 });
     }
-    const order = createSale(body);
+    const order = await createSale(body);
     return NextResponse.json(order);
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Sale failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return errorResponse(e, "Sale failed", 400);
   }
 }
 
@@ -38,9 +42,8 @@ export async function PATCH(request: Request) {
     if (body.action !== "void" || !body.orderId) {
       return NextResponse.json({ error: "Invalid void request" }, { status: 400 });
     }
-    return NextResponse.json(voidOrder(body.orderId));
+    return NextResponse.json(await voidOrder(body.orderId));
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Void failed";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return errorResponse(e, "Void failed", 400);
   }
 }
